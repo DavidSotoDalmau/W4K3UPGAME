@@ -120,6 +120,12 @@
     var rng = new U.RNG(String(seed) + '|world');
     var layers = [];
     for (var L = 0; L < 9; L++) layers.push(genLayer(rng, L));
+    var rr = new U.RNG(String(seed) + '|rescue');
+    layers.forEach(function (Ly) {
+      Ly.nodes.forEach(function (n) {
+        if (Ly.index >= 1 && Ly.index <= 7 && (n.type === 'investigation' || n.type === 'infiltration' || n.type === 'highrisk') && rr.chance(0.3)) n.rescue = true;
+      });
+    });
     return layers;
   }
 

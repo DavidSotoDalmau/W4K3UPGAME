@@ -74,7 +74,7 @@
       text: 'Varela te recibe sin guardias. "La gente es infeliz en el desorden", dice, y no miente. Te ofrece un informe: lo que el sistema evitó el año pasado y lo que costó.',
       choices: [
         { label: 'Aceptar el informe', fx: { evidenceV: 1, vis: 12, flag: 'varela_met' }, out: 'Las cifras son reales. También los nombres que faltan en ellas. Sales con ambas cosas.' },
-        { label: 'Debatir con ella en público', fx: { noise: 10, div: 6, vis: 10 }, out: 'Su argumento es mejor de lo que querías. El público te ve rechazarlo igual.' },
+        { label: 'Debatir con ella en público', debate: true, fx: {}, out: 'Su argumento es mejor de lo que querías. El público te ve rechazarlo igual.' },
         { label: 'Marcharte', fx: { vis: -2 }, out: 'Declinas. Ella no parece sorprendida, y eso te molesta más.' }] }),
 
     S({ id: 'distress', kinds: ['social'], layers: [3, 7], title: 'Una petición de auxilio',
@@ -232,7 +232,7 @@
       text: 'Varela te cita otra vez. Esta vez no hay té. Hay un documento: un marco de supervisión humana para SATURNO, con una condición: tu firma como garante. "No te pido que dejes de dudar", dice. "Te pido que dudes desde dentro."',
       choices: [
         { label: 'Aceptar el pacto', fx: { rep: { inst: 2, saturno: 1, w4k3up: -2 }, flag: 'varela_pact', vis: -8 }, out: 'Firmas. El silencio que sigue es cómodo. En algún canal, alguien deja de responderte.' },
-        { label: 'Contraofertar con auditoría pública', fx: { noise: 10, div: 6, vis: 8, rep: { inst: 1, noise: 1 } }, out: 'Ella tarda en responder. "Interesante", dice. Es lo más cerca que está de un elogio.' },
+        { label: 'Contraofertar con auditoría pública', debate: true, fx: { noise: 10, div: 6, vis: 8, rep: { inst: 1, noise: 1 } }, out: 'Ella tarda en responder. "Interesante", dice. Es lo más cerca que está de un elogio.' },
         { label: 'Rechazarlo', fx: { rep: { inst: -1, w4k3up: 1 } }, out: 'Te vas. Ella no te sigue. No lo necesita.' }] }),
 
     S({ id: 'john_return', kinds: ['social'], layers: [4, 8], rare: true, cond: function (s) { return s.flags.indexOf('knows_pattern') >= 0; }, title: 'John vuelve con un diagrama',
@@ -264,6 +264,26 @@
         { label: 'Argumentar contra su lógica', fx: { div: 8, vis: 8, rep: { saturno: -1, noise: 1 } }, out: 'Responde con corrección. Pierde unos milisegundos en cada réplica; son milisegundos que antes no perdía.' },
         { label: 'Escuchar cómo justifica el control', fx: { energy: -1, evidenceV: 1, rep: { saturno: 1 }, flag: 'saturno_logic' }, out: 'Archivas su explicación. Es consistente, y precisamente por eso inquietante.' },
         { label: 'Guardar silencio', fx: { div: 6, vis: -4 }, out: 'No respondes. Es la primera vez que algo no se puede clasificar como respuesta.' }] }),
+
+    S({ id: 'salvat_exercise', kinds: ['social'], layers: [3, 8], title: 'El ejercicio de Salvat',
+      text: 'En una pizarra hay cuatro casillas: sin intervención, seguimiento, evaluación e intervención. El profesor Salvat reparte casos reales y dice: "No busco que aciertes. Quiero que puedas justificar por qué pones cada caso donde lo pones." Laura te hace sitio en la mesa.',
+      choices: [
+        { label: 'Participar en el ejercicio', mg: 'salvat', fx: {}, out: '' },
+        { label: 'Observar desde el fondo', fx: { vis: -2, evidence: 1 }, out: 'Copias las categorías y las hojas de casos. Verlas desde fuera también enseña cómo se decide.' },
+        { label: 'Marcharte', fx: { div: 3 }, out: 'Salir de un ejercicio de clasificación es, ya de por sí, una forma de no dejarse clasificar.' }] }),
+
+    S({ id: 'ghost_loop', kinds: ['social', 'resource'], layers: [7, 8], title: 'El Ghost Loop',
+      text: 'La pantalla se queda negra y empiezan a pasar frases, una tras otra, con la voz de todos los que alguna vez te dijeron lo mismo. "Borrando… corrigiendo… silenciando…" En el margen, una nota de Noise: "No respondas como esperan."',
+      choices: [
+        { label: 'Entrar al bucle', mg: 'ghostloop', fx: {}, out: '' },
+        { label: 'Cerrar la sesión', fx: { vis: -6, div: 4 }, out: 'Cortas la conexión. Las voces siguen un rato en tu cabeza, pero ya no en la pantalla.' }] }),
+
+    S({ id: 'miguel_map', kinds: ['social', 'resource'], layers: [2, 8], title: 'El mapa de Miguel',
+      text: 'Miguel despliega un mapa dibujado a lápiz: una casa, un mercado, una estación, una radio comunitaria. "No es red", dice. "Es gente." Quiere unir esos lugares con cartas, teléfonos sin batería y frases en papeles, de modo que la red aguante aunque caiga alguno.',
+      choices: [
+        { label: 'Tejer la red humana', mg: 'humanmap', fx: {}, out: '' },
+        { label: 'Memorizar el mapa', fx: { energy: -1, evidenceV: 1, rep: { w4k3up: 1 } }, out: 'Te lo aprendes de memoria y se lo devuelves. El papel es lo primero que se pierde; lo que recuerdas, no.' },
+        { label: 'Dejarlo a Miguel', fx: { vis: -2 }, out: 'Él lo hará mejor que tú, y lo sabe. Aun así, te lo agradece.' }] }),
 
     S({ id: 'ghost_mirror', kinds: ['social'], layers: [1, 8], cond: function (s) { return s.ghosts && s.ghosts.length > 0; }, title: 'Tu eco',
       text: function (s) {

@@ -66,13 +66,13 @@
   function blockedForPlayer(m) { return function (x, y) { return !!enemyAt(m, x, y, false); }; }
 
   /* ---------- generación ---------- */
-  function generate(seed, node, ap, cmCount, ctx, scanned, threat, ghost) {
+  function generate(seed, node, ap, cmCount, ctx, scanned, threat, ghost, rescue) {
     var rng = new U.RNG(seed + '|tac|' + node.id);
     var big = threat >= 4 || node.type === 'highrisk' || node.type === 'elite' || node.type === 'gateway';
     var w = big ? 12 : 10, h = w;
     var m = { w: w, h: h, tiles: [], terminals: [], pickups: [], exit: { x: w - 1, y: h - 1 }, enemies: [], seen: [], approach: ap, ctx: ctx,
       player: { x: 0, y: h - 1, ap: APPROACHES[ap].ap, maxAp: APPROACHES[ap].ap, hidden: false, charges: APPROACHES[ap].charges },
-      masks: ctx.masks || 0, turn: 1, maxTurn: big ? 28 : 24, suspicion: 0, alerted: false, lastSeen: null, reveal: scanned ? 2 : 0, status: 'play',
+      masks: ctx.masks || 0, seed: seed, nodeId: node.id, layer: node.layer, hack: null, turn: 1, maxTurn: big ? 28 : 24, suspicion: 0, alerted: false, lastSeen: null, reveal: scanned ? 2 : 0, status: 'play',
       acts: { distract: 0, hide: 0, disable: 0, observe: 0, neutralize: 0 }, kills: 0, terminalUsed: false, collected: 0, msgs: [], nodeType: node.type, cm: cmCount > 0 ? cmCount : 0 };
     m.seen = new Array(w * h).fill(0);
 
@@ -132,6 +132,11 @@
     for (var b = 0; b < needP; b++) {
       var pp = take(3, 3, placed) || take(2, 1, placed) || free.pop();
       placed.push(pp); m.pickups.push({ x: pp[0], y: pp[1], got: false });
+    }
+    if (rescue) {
+      var rp = take(4, 3, placed) || take(2, 1, placed) || free.pop();
+      placed.push(rp);
+      m.rescue = { x: rp[0], y: rp[1], state: 'bound', trap: !!rescue.trap, who: rescue.who };
     }
     // enemigos base
     var cams = Math.min(4, 1 + Math.floor(threat / 2)), pats = Math.min(3, Math.max(1, Math.ceil(threat / 2)));
@@ -279,6 +284,16 @@
     if (m.status === 'play') {
       var sum = 0;
       m.enemies.forEach(function (e) { sum += seeGain(m, e); });
+      var R = m.rescue;
+      if (R && R.state === 'free') {
+        var cHid = m.player.hidden && cheb(R.x, R.y, m.player.x, m.player.y) <= 1, capt = false;
+        if (!cHid) m.enemies.forEach(function (e) {
+          if (e.disabled) return;
+          if (inView(m, e, R.x, R.y)) sum += (e.type === 'patrol' ? 20 : (e.type === 'camera' ? 12 : 10)) * (m.ctx.burner ? 0.7 : 1) * (m.ctx.susp || 1);
+          if (e.type === 'patrol' && cheb(e.x, e.y, R.x, R.y) <= 1) capt = true;
+        });
+        if (capt) { R.state = 'captured'; msg(m, R.who.name + ' fue capturada por una patrulla.'); }
+      }
       sum = Math.min(70, Math.round(sum));
       if (sum > 0) {
         m.suspicion = Math.min(100, m.suspicion + sum); m.lastSeen = { x: m.player.x, y: m.player.y };
@@ -335,7 +350,20 @@
     return m.enemies.filter(function (e) { return !e.disabled && e.type === 'patrol' && cheb(p.x, p.y, e.x, e.y) <= 1; });
   }
   function complete(m) {
-    return m.terminals.every(function (t) { return t.done; }) && m.pickups.every(function (u) { return u.got; });
+    var rescued = !m.rescue || m.rescue.state === 'free' || m.rescue.state === 'trap';
+    return rescued && m.terminals.every(function (t) { return t.done; }) && m.pickups.every(function (u) { return u.got; });
+  }
+  function rescueTargetNear(m) { var R = m.rescue, P = m.player; return !!(R && R.state === 'bound' && cheb(P.x, P.y, R.x, R.y) <= 1); }
+  function freeCost(m) { return m.approach === 'hack' ? 1 : 2; }
+  // La persona liberada te sigue: avanza hacia ti hasta quedar a una celda.
+  function followContact(m, steps) {
+    var R = m.rescue;
+    if (!R || R.state !== 'free') return;
+    for (var i = 0; i < steps && cheb(R.x, R.y, m.player.x, m.player.y) > 1; i++) {
+      var st = stepToward(m, { x: R.x, y: R.y }, m.player.x, m.player.y);
+      if (!st || (st.x === m.player.x && st.y === m.player.y) || enemyAt(m, st.x, st.y, false)) break;
+      R.x = st.x; R.y = st.y;
+    }
   }
   function objectives(m) {
     var out = [], tdone = m.terminals.filter(function (t) { return t.done; }).length, pdone = m.pickups.filter(function (u) { return u.got; }).length;
@@ -344,12 +372,18 @@
       out.push({ text: (k === 'relay' ? 'Instalar el relé' : (k === 'core' ? 'Destruir los núcleos de SATURNO' : 'Acceder a la terminal')) + ' (' + tdone + '/' + m.terminals.length + ')', done: tdone === m.terminals.length });
     }
     if (m.pickups.length) out.push({ text: 'Recuperar evidencia (' + pdone + '/' + m.pickups.length + ')', done: pdone === m.pickups.length });
+    if (m.rescue) {
+      var R = m.rescue, who = R.who.name;
+      out.push({ text: R.state === 'free' ? 'Llevar a ' + who + ' hasta la salida' : (R.state === 'trap' ? 'Era una trampa de SATURNO (objetivo cancelado)' : (R.state === 'captured' ? who + ' fue capturada' : 'Liberar a la persona retenida')), done: R.state === 'trap' });
+    }
     out.push({ text: 'Extraer en la salida (X)', done: false });
     return out;
   }
 
   function act(m, a, p) {
     if (m.status !== 'play') return fail('La misión ya terminó.');
+    if (m.hack && a !== 'hackguess' && a !== 'hackforce') return fail('Termina primero la intrusión.');
+    if (m.ant && a !== 'antscan' && a !== 'anttx' && a !== 'antforce') return fail('Termina primero el montaje de la antena.');
     var P = m.player, res = { ok: true };
     function spend(n) { if (P.ap < n) return false; P.ap -= n; return true; }
     switch (a) {
@@ -358,6 +392,7 @@
         var d = bfs(m, P.x, P.y, blockedForPlayer(m), P.ap), c = d[ix(m, p.x, p.y)];
         if (c <= 0) return fail(c === 0 ? 'Ya estás ahí.' : 'Fuera de alcance con tus PA.');
         P.ap -= c; P.x = p.x; P.y = p.y; P.hidden = false;
+        followContact(m, c);
         break;
       }
       case 'observe':
@@ -369,7 +404,18 @@
         if (!t) return fail(accessRange(m) > 1 ? 'No hay terminales a distancia 3 con línea de visión.' : 'Colócate junto a una terminal.');
         var cost = termCost(m, t);
         if (P.ap < cost) return fail('Necesitas ' + cost + ' PA para esto.');
-        P.ap -= cost; t.done = true; m.terminalUsed = true;
+        P.ap -= cost;
+        if (m.ctx.puzzle && W4.Minigames && t.kind === 'relay') {
+          m.ant = W4.Minigames.antCreate(m.seed, m.nodeId, m.layer, m.approach); m.ant.tIdx = m.terminals.indexOf(t);
+          msg(m, 'Subes a la azotea con la antena: ajusta orientación, mástil y frecuencia.');
+          break;
+        }
+        if (m.ctx.puzzle && W4.Minigames) {
+          m.hack = W4.Minigames.hackCreate(m.seed, m.nodeId, m.terminals.indexOf(t), m.layer, m.approach);
+          msg(m, 'Intrusión iniciada: descifra el código de ' + m.hack.len + ' símbolos.');
+          break;
+        }
+        t.done = true; m.terminalUsed = true;
         msg(m, t.kind === 'relay' ? 'Relé instalado.' : (t.kind === 'core' ? 'Núcleo destruido.' : 'Terminal comprometida.'));
         break;
       }
@@ -418,8 +464,52 @@
         msg(m, 'Patrulla neutralizada. El ruido de la pelea sube la sospecha.');
         break;
       }
+      case 'hackguess': {
+        var hk = m.hack;
+        if (!hk) return fail('No hay una intrusión abierta.');
+        var gr = W4.Minigames.hackGuess(hk, p && p.guess);
+        if (!gr.ok) return fail(gr.msg);
+        if (gr.status === 'won') finishHack(m, true);
+        else if (gr.status === 'lost') finishHack(m, false);
+        return { ok: true, feedback: gr };
+      }
+      case 'antscan': {
+        if (!m.ant) return fail('No hay una antena en montaje.');
+        var sr = W4.Minigames.antScan(m.ant, p && p.freq);
+        if (!sr.ok) return fail(sr.msg);
+        return { ok: true, scan: sr };
+      }
+      case 'anttx': {
+        if (!m.ant) return fail('No hay una antena en montaje.');
+        var tr = W4.Minigames.antTx(m.ant, p && p.dir, p && p.h, p && p.f);
+        if (!tr.ok) return fail(tr.msg);
+        if (tr.res === 'detectada' || tr.res === 'visible') { m.suspicion = Math.min(99, m.suspicion + 10); msg(m, tr.text + ' (sospecha +10)'); } else msg(m, tr.text);
+        if (tr.status === 'won') finishAnt(m, true, tr.quality); else if (tr.status === 'lost') finishAnt(m, false);
+        return { ok: true, tx: tr };
+      }
+      case 'antforce':
+        if (!m.ant) return fail('No hay una antena en montaje.');
+        finishAnt(m, false, 'forced');
+        break;
+      case 'hackforce':
+        if (!m.hack) return fail('No hay una intrusión abierta.');
+        finishHack(m, false, true);
+        break;
+      case 'free': {
+        var R0 = m.rescue;
+        if (!R0 || R0.state !== 'bound') return fail('No hay nadie a quien liberar.');
+        if (cheb(P.x, P.y, R0.x, R0.y) > 1) return fail('Colócate junto a la persona retenida.');
+        var fc = freeCost(m);
+        if (!spend(fc)) return fail('Necesitas ' + fc + ' PA.');
+        if (R0.trap) {
+          R0.state = 'trap'; m.suspicion = Math.min(99, m.suspicion + 45); m.alerted = true; m.lastSeen = { x: P.x, y: P.y };
+          msg(m, 'Era un señuelo de SATURNO: sus unidades se activan y te buscan.');
+        } else { R0.state = 'free'; msg(m, 'Liberas a ' + R0.who.name + '. Te seguirá: llévala hasta la salida.'); }
+        break;
+      }
       case 'extract': {
         if (P.x !== m.exit.x || P.y !== m.exit.y) return fail('Debes estar en la salida (X).');
+        if (m.rescue && m.rescue.state === 'free' && cheb(m.rescue.x, m.rescue.y, m.exit.x, m.exit.y) > 1) return fail('Tu contacto debe estar junto a la salida. Espera a que te alcance.');
         if (!spend(1)) return fail('Sin PA suficientes.');
         m.status = complete(m) ? 'won' : 'extracted';
         break;
@@ -430,17 +520,40 @@
     if (m.acts && m.acts[a] != null) m.acts[a]++;
     if (m.status === 'play') {
       updateSeen(m);
-      if (P.ap <= 0) endTurn(m);
+      if (P.ap <= 0 && !m.hack && !m.ant) endTurn(m);
     }
     return res;
   }
 
+  function finishHack(m, won, forced) {
+    var h = m.hack, t = m.terminals[h.tIdx], P = m.player;
+    t.done = true; m.terminalUsed = true; m.hack = null;
+    var what = t.kind === 'relay' ? 'Relé instalado' : (t.kind === 'core' ? 'Núcleo destruido' : 'Terminal comprometida');
+    if (won) {
+      if (h.guesses.length <= 2) { P.ap = Math.min(P.maxAp, P.ap + 1); msg(m, what + ' con una intrusión limpia: recuperas 1 PA.'); }
+      else msg(m, what + '.');
+    } else {
+      m.suspicion = Math.min(99, m.suspicion + 30); m.lastSeen = { x: P.x, y: P.y };
+      if (m.suspicion >= 50) m.alerted = true;
+      msg(m, (forced ? 'Forzaste el acceso' : 'La intrusión falló (el código era ' + W4.Minigames.codeText(h) + ')') + ': ' + what.toLowerCase() + ', pero saltó una alarma (sospecha +30).');
+    }
+  }
+  function finishAnt(m, won, quality) {
+    var a = m.ant, t = m.terminals[a.tIdx], P = m.player;
+    t.done = true; m.terminalUsed = true; m.ant = null;
+    if (won) { m.antQ = quality; msg(m, quality === 'clear' ? 'Relé instalado con un enlace limpio: SATURNO no lo ve.' : 'Relé instalado, con mucha estática.'); }
+    else {
+      m.antQ = 'fail'; m.suspicion = Math.min(99, m.suspicion + 30); m.lastSeen = { x: P.x, y: P.y };
+      if (m.suspicion >= 50) m.alerted = true;
+      msg(m, (quality === 'forced' ? 'Dejas la antena como está' : 'No logras un enlace estable') + ': el relé queda instalado a medias y salta una alarma (sospecha +30).');
+    }
+  }
   function reachable(m) { return bfs(m, m.player.x, m.player.y, blockedForPlayer(m), m.player.ap); }
 
   W4.Missions = {
     APPROACHES: APPROACHES, DIRN: DIRN, energyCost: energyCost, effThreat: effThreat, visRisk: visRisk,
     generate: generate, act: act, reachable: reachable, visible: visibleSet, inView: inView, objectives: objectives, complete: complete,
     nearbyTerminal: nearbyTerminal, pickupHere: pickupHere, disableTargets: disableTargets, neutralizeTargets: neutralizeTargets,
-    termCost: termCost, toolCost: toolCost, ix: ix
+    termCost: termCost, toolCost: toolCost, rescueTargetNear: rescueTargetNear, freeCost: freeCost, ix: ix
   };
 })();

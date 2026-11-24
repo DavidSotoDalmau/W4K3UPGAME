@@ -1,11 +1,11 @@
 /* Renderizado e interacción. Lee el estado de W4.Game; nunca modifica reglas directamente. */
 (function () {
   'use strict';
-  var W4 = window.W4, U = W4.U, G = W4.Game, W = W4.World, SAT = W4.Saturno, M = W4.Missions, PE = W4.Persist, EV = W4.Events, AU = W4.Audio, T = W4.Tactical;
+  var W4 = window.W4, U = W4.U, G = W4.Game, W = W4.World, SAT = W4.Saturno, M = W4.Missions, PE = W4.Persist, EV = W4.Events, MG = W4.Minigames, AU = W4.Audio, T = W4.Tactical;
   var esc = U.esc, LBL = SAT.LABEL;
   var $ = function (id) { return document.getElementById(id); };
 
-  var UI = { screen: 'menu', tab: 'map', selNode: null, modal: null, tacMode: 'move', tacPreview: null, inspect: '', target: null, _prev: null };
+  var UI = { screen: 'menu', tab: 'map', selNode: null, modal: null, tacMode: 'move', ant: null, hn: { sel: null }, hackGuess: [], tacPreview: null, inspect: '', target: null, _prev: null };
 
   var HELP = {
     vis: ['Visibilidad', 'Cuánto sabe SATURNO de tu actividad actual (0-100). Con 40 o más tu sospecha sube más rápido. Con 70 te cazan y pueden interceptarte al entrar a un nodo. Con 100 quedas neutralizado. Refugios, SIM Fantasma y enfoques silenciosos la reducen.'],
@@ -36,6 +36,16 @@
       'Antes de entrar eliges un enfoque. Sigilo: silencioso y con más señuelos. Hackeo: terminales rápidas, evidencia verificada. Directo: más PA y puedes neutralizar patrullas, pero hace ruido. Cada enfoque es también lo que SATURNO intenta predecir.'],
     ['tac1', function (s) { return s.cur && s.cur.stage === 'tac'; },
       'Toca una celda para moverte (gasta 1 PA por celda). Las zonas rojas son conos de visión: te detectan cuando termina el turno enemigo y estás dentro. Las cámaras giran cada turno. Escóndete en coberturas, usa señuelos y llega a la salida (X).'],
+    ['rescue1', function (s) { return s.cur && s.cur.stage === 'tac' && s.cur.mission && s.cur.mission.rescue; },
+      'Rescate: colócate junto a la persona retenida (C) y usa Liberar. Después te seguirá a una celda de distancia: las patrullas y cámaras también pueden verla, y si una patrulla se le acerca la capturan. Debe estar junto a la salida cuando extraigas. Cuidado: si SATURNO sabe que siempre acudes a quien pide ayuda, la petición puede ser una trampa.'],
+    ['hack1', function (s) { return s.cur && s.cur.mission && s.cur.mission.hack; },
+      'Intrusión: adivina el código de símbolos (sin repetir). ●N = símbolos correctos en su lugar; ○N = correctos en otro lugar. Si lo resuelves en 2 intentos o menos recuperas 1 PA. Si fallas o fuerzas el acceso, la terminal se abre igual pero salta una alarma (+30 sospecha).'],
+    ['ant1', function (s) { return s.cur && s.cur.mission && s.cur.mission.ant; },
+      'Antena: apunta hacia el salón de actos (la brújula te lo dice), elige un mástil que supere el depósito pero sin asomar de más, y una frecuencia que SATURNO no vigile. Escanea bandas para descubrir cuáles están vigiladas y dónde hay menos estática. Un enlace limpio amplifica tu Ruido.'],
+    ['mg1', function (s) { return s.cur && s.cur.mg && !s.cur.result; },
+      'Minijuego: lee las instrucciones del panel. Los resultados se aplican al terminar. Estos minijuegos salen de escenas de la novela y todos acaban dándote algo, también si no sales bien parado.'],
+    ['debate1', function (s) { return s.cur && s.cur.debate && !s.cur.result; },
+      'Debate: tres rondas. Fíjate en cómo argumenta Varela: ¿cifras, deber o personas? Cada tipo se contesta mejor con un enfoque distinto. Si repites tu estilo, ella lo anticipa.'],
     ['forecast', function (s) { return s.cur && s.cur.kind === 'op' && s.cur.stage === 'brief' && s.saturno.n >= 2; },
       'SATURNO predice tu enfoque según tus hábitos. Cuando está seguro prepara una contramedida: más unidades justo contra ese enfoque. Cambia de enfoque, usa un Inhibidor de Señal o alimenta su modelo con un Guion Señuelo.'],
     ['div1', function (s) { return s.res.div > 0 && s.phase === 'map'; },
@@ -223,6 +233,7 @@
     h += '<dt>Amenaza</dt><dd>' + esc(threatText(n)) + '</dd>';
     h += '<dt>Recompensa</dt><dd>' + (n.scanned ? esc(rewardText(n)) : '<span class="hide">desconocida hasta escanear</span>') + '</dd>';
     h += '<dt>Riesgo de Visibilidad</dt><dd>' + M.visRisk(s, n) + '</dd>';
+    if (n.rescue) h += '<dt>Señal</dt><dd class="warn-t">Petición de auxilio: alguien está retenido aquí.</dd>';
     h += '<dt>Consecuencias</dt><dd>' + esc(TYPE_RISK[n.type]) + '</dd>';
     h += '<dt>Estado</dt><dd>' + ST_ES[st].charAt(0).toUpperCase() + ST_ES[st].slice(1) + '</dd></dl>';
     if (n.watch) h += '<p class="warn-t">◉ SATURNO vigila este nodo: +1 amenaza. Predijo que vendrías aquí.</p>';
@@ -298,6 +309,8 @@
       '<dt>Recompensa</dt><dd>' + (n.scanned ? esc(rewardText(n)) : '<span class="hide">desconocida hasta escanear</span>') + '</dd>' +
       '<dt>Riesgo de Visibilidad</dt><dd>' + M.visRisk(s, n) + '</dd></dl>';
     if (c.intercept) h += '<p class="alert">' + esc(c.intercept) + '</p>';
+    if (n.rescue) h += n.scanned && c.trap ? '<p class="alert">RESCATE: alguien pide auxilio, pero los metadatos de la señal no cuadran. Probable trampa de SATURNO (respondes siempre a las peticiones de ayuda).</p>'
+      : '<p class="warn-t">RESCATE: una persona retenida pide auxilio. Libérala y sácala por la salida: se une a tu red. ' + (n.scanned ? 'La señal parece auténtica.' : 'Escanea el nodo para verificar su origen.') + '</p>';
     var gh = c.ghost ? s.ghosts.filter(function (x) { return x.id === c.ghost; })[0] : null;
     if (gh) { var gpf = PE.ghostProfile(gh); h += '<p class="sat">Eco de una operación anterior (' + esc(gh.name) + ') opera aquí y sustituye a una patrulla.' + (s.flags.indexOf('ghost_hint') >= 0 ? ' ' + esc(PE.MODE_TEXT[gpf.mode]) : ' Su comportamiento se revelará al verlo.') + '</p>'; }
     var armed = Object.keys(s.armed).map(function (k) { return k === 'jam' ? 'Inhibidor de Señal' : 'Credenciales Desechables'; });
@@ -328,6 +341,118 @@
     return h;
   }
 
+  function hackPanel(m) {
+    var hk = m.hack, SY = MG.SYM;
+    if (!UI.hackGuess || UI.hackGuess.length > hk.len) UI.hackGuess = [];
+    var h = '<div class="panel hack"><div class="ph"><b>Intrusión</b><span class="tag">intentos ' + hk.guesses.length + '/' + hk.attempts + '</span></div>' +
+      '<p class="muted small">Descifra el código de ' + hk.len + ' símbolos distintos. ●N = correcto en su lugar. ○N = correcto en otro lugar.</p>';
+    if (hk.hint) h += '<p class="good-t small">Pista de Hackeo: el símbolo ' + SY[hk.hint.sym] + ' va en la posición ' + (hk.hint.pos + 1) + '.</p>';
+    hk.guesses.forEach(function (g) {
+      h += '<div class="hrow"><span class="hsyms">' + g.g.map(function (x) { return '<i class="sym s' + x + '">' + SY[x] + '</i>'; }).join('') + '</span><span class="hfb">●' + g.exact + ' ○' + g.partial + '</span></div>';
+    });
+    h += '<div class="hrow cur"><span class="hsyms">';
+    for (var i = 0; i < hk.len; i++) h += '<i class="sym slot ' + (UI.hackGuess[i] != null ? 's' + UI.hackGuess[i] : '') + '">' + (UI.hackGuess[i] != null ? SY[UI.hackGuess[i]] : '_') + '</i>';
+    h += '</span></div><div class="palette">';
+    for (var k = 0; k < hk.nsym; k++) h += '<button class="btn sym s' + k + '" data-act="hksym" data-k="' + k + '"' + (UI.hackGuess.indexOf(k) >= 0 || UI.hackGuess.length >= hk.len ? ' disabled' : '') + '>' + SY[k] + '</button>';
+    h += '</div><div class="row"><button class="btn small" data-act="hkdel"' + (UI.hackGuess.length ? '' : ' disabled') + '>Borrar</button>' +
+      '<button class="btn primary" data-act="hkgo"' + (UI.hackGuess.length === hk.len ? '' : ' disabled') + '>Probar código</button>' +
+      '<button class="btn small danger" data-act="hkforce">Forzar acceso (+30 sospecha)</button></div></div>';
+    return h;
+  }
+  function antPanel(m) {
+    var a = m.ant, BR = MG.BEARINGS, st = UI.ant = UI.ant || { dir: null, h: null, f: null };
+    var h = '<div class="panel hack"><div class="ph"><b>Montaje de la antena</b><span class="tag">transmisiones ' + a.tries + ' · escaneos ' + a.scans + '</span></div>' +
+      '<p class="muted small">El salón de actos queda al <b>' + BR[a.bearing] + '</b>. El depósito de la azotea mide <b>' + a.obstacle + '</b> tramos: el mástil debe superarlo, pero sin asomar demasiado (más de ' + (a.obstacle + 2) + ' lo ve una cámara). SATURNO vigila varias bandas: escanea para saber cuáles y dónde hay menos estática.</p>';
+    h += '<svg viewBox="0 0 220 90" class="roofsvg" role="img" aria-label="Azotea con depósito y mástil"><line x1="5" y1="80" x2="215" y2="80" stroke="#3a4b58" stroke-width="2"/>' +
+      '<rect x="40" y="' + (80 - a.obstacle * 14) + '" width="40" height="' + (a.obstacle * 14) + '" fill="#2b3944" stroke="#3a4b58"/><text x="60" y="' + (74 - a.obstacle * 14) + '" fill="#8797a3" font-size="9" text-anchor="middle">depósito</text>' +
+      '<line x1="140" y1="80" x2="140" y2="' + (80 - (st.h || 0) * 14) + '" stroke="#46e3f2" stroke-width="3"/>' + (st.h ? '<circle cx="140" cy="' + (80 - st.h * 14) + '" r="4" fill="#ffb340"/>' : '') + '</svg>';
+    h += '<p class="muted small">Orientación</p><div class="palette">';
+    BR.forEach(function (b, i) { h += '<button class="btn small' + (st.dir === i ? ' on' : '') + '" data-act="antdir" data-k="' + i + '">' + b + '</button>'; });
+    h += '</div><p class="muted small">Mástil (tramos)</p><div class="palette">';
+    for (var k = 1; k <= 5; k++) h += '<button class="btn small' + (st.h === k ? ' on' : '') + '" data-act="anth" data-k="' + k + '">' + k + '</button>';
+    h += '</div><p class="muted small">Frecuencia</p><div class="palette">';
+    for (var f = 1; f <= 9; f++) {
+      var rv = a.revealed[f], mark = rv ? (rv === 'vigilada' ? ' ✕' : ' ✓') : '';
+      h += '<button class="btn small' + (st.f === f ? ' on' : '') + (rv === 'vigilada' ? ' bad' : '') + '" data-act="antf" data-k="' + f + '">' + f + mark + '</button>';
+    }
+    h += '</div>';
+    var info = Object.keys(a.revealed).map(function (f) { return 'Banda ' + f + ': ' + a.revealed[f]; });
+    if (info.length) h += '<p class="small good-t">' + esc(info.join(' · ')) + '</p>';
+    h += '<div class="row"><button class="btn small" data-act="antscan"' + (st.f && a.revealed[st.f] === undefined && a.scans > 0 ? '' : ' disabled') + '>Escanear banda (' + a.scans + ')</button>' +
+      '<button class="btn primary" data-act="anttx"' + (st.dir != null && st.h && st.f ? '' : ' disabled') + '>Transmitir</button>' +
+      '<button class="btn small danger" data-act="antforce">Dejarlo así (+30 sospecha)</button></div>';
+    a.log.forEach(function (l) { h += '<p class="small ' + (l.res === 'clara' || l.res === 'debil' ? 'good-t' : 'warn-t') + '">' + BR[l.dir] + ' / mástil ' + l.h + ' / banda ' + l.f + ': ' + esc(l.text) + '</p>'; });
+    return h + '</div>';
+  }
+  function salvatView(s, g) {
+    var c = MG.CASES[g.ids[g.i]], h = '<div class="panel event"><div class="ph"><b>El ejercicio de Salvat</b><span class="tag">Caso ' + (g.i + 1) + '/4 · puntos ' + g.pts + '</span></div><p>' + esc(c.text) + '</p></div>';
+    if (g.phase === 'cat') {
+      h += '<p class="muted small">Elige una casilla. Equivocarse también tiene un coste, en las dos direcciones.</p>';
+      Object.keys(MG.CATS).forEach(function (k) { h += '<button class="choice" data-act="mg" data-k="cat" data-p="' + k + '"><span class="cl">' + MG.CATS[k] + '</span></button>'; });
+    } else if (g.phase === 'why') {
+      h += '<p class="sat">Elegiste: ' + MG.CATS[g.cat] + '. ¿Por qué?</p>';
+      Object.keys(MG.WHYS).forEach(function (k) { h += '<button class="choice" data-act="mg" data-k="why" data-p="' + k + '"><span class="cl">' + MG.WHYS[k] + '</span></button>'; });
+    } else {
+      h += '<div class="panel"><p class="sat">' + esc(g.fb) + '</p></div><button class="btn primary" data-act="mg" data-k="next">' + (g.i >= 3 ? 'Terminar el ejercicio' : 'Siguiente caso') + '</button>';
+    }
+    return h;
+  }
+  function glView(s, g) {
+    var it = g.items[g.round], h = '<div class="panel event glp"><div class="ph"><b>Ghost Loop</b><span class="tag">Voz ' + (g.round + 1) + '/5 · puntos ' + g.pts + '</span></div>';
+    if (g.fb) h += '<p class="muted small">' + esc(g.fb) + '</p>';
+    h += '<p class="sat glq">' + esc(it.text) + '</p>';
+    var cnt = { listen: 0, other: 0, tear: 0, open: 0 }; g.picks.forEach(function (p) { cnt[p]++; });
+    h += '<p class="muted small">El bucle te va conociendo: ' + Object.keys(cnt).map(function (k) { return MG.GL_OPTS[k] + ' x' + cnt[k]; }).join(', ') + '. Manual del NO: "No respondas como esperan."</p></div>';
+    Object.keys(MG.GL_OPTS).forEach(function (k) { h += '<button class="choice" data-act="mg" data-k="opt" data-p="' + k + '"><span class="cl">' + MG.GL_OPTS[k] + '</span><span class="muted small">' + esc(MG.GL_HELP[k]) + '</span></button>'; });
+    return h;
+  }
+  function hnView(s, g) {
+    var pos = [], i, k;
+    for (i = 0; i < g.n; i++) { var an = (-90 + 60 * i) * Math.PI / 180; pos.push([160 + 105 * Math.cos(an), 150 + 100 * Math.sin(an)]); }
+    var sel = UI.hn.sel, chk = MG.hnCheck(g, g.links);
+    var svg = '<svg viewBox="0 0 320 300" class="hnsvg" role="group" aria-label="Mapa de nodos humanos">';
+    Object.keys(g.edges).forEach(function (key) {
+      var e = g.edges[key], a = pos[e.a], b = pos[e.b], on = g.links.indexOf(key) >= 0, hot = sel === e.a || sel === e.b;
+      if (!on && !e.blocked && !hot) return;
+      var col = e.blocked ? '#ff4d5e' : (on ? '#46e3f2' : '#ffb340');
+      svg += '<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="' + col + '" stroke-width="' + (on ? 3 : 1.5) + '"' + (e.blocked ? ' stroke-dasharray="4 4" opacity=".6"' : (on ? '' : ' stroke-dasharray="2 3"')) + '/>';
+      var mx = (a[0] + b[0]) / 2, my = (b[1] + a[1]) / 2;
+      svg += '<text x="' + mx + '" y="' + my + '" fill="' + col + '" font-size="11" text-anchor="middle" class="hnlbl">' + (e.blocked ? '✕' : e.cost) + '</text>';
+    });
+    g.names.forEach(function (nm, idx) {
+      var c = pos[idx], bad = chk.critical === idx && g.tested;
+      svg += '<g class="hnn' + (sel === idx ? ' sel' : '') + '" transform="translate(' + c[0] + ',' + c[1] + ')" data-act="hnnode" data-k="' + idx + '" tabindex="0" role="button" aria-label="' + esc(nm) + '"><circle r="22" class="hnc' + (bad ? ' crit' : '') + '"/><text y="4" text-anchor="middle" class="hnt">' + (idx + 1) + '</text>';
+      wrapName(nm).forEach(function (ln, j) { svg += '<text y="' + (36 + j * 11) + '" text-anchor="middle" class="hnl">' + esc(ln) + '</text>'; });
+      svg += '</g>';
+    });
+    svg += '</svg>';
+    var h = '<div class="panel event"><div class="ph"><b>Tejer la red humana</b><span class="tag">coste ' + chk.cost + '/' + g.budget + '</span></div>' +
+      '<p class="muted small">Toca dos nodos para unirlos con un enlace (el número es su coste). Los enlaces ✕ rojos están vigilados por SATURNO. Objetivo: que la red siga conectada aunque caiga cualquier nodo.</p>' + svg;
+    if (sel != null) {
+      h += '<p class="small warn-t">Desde ' + esc(g.names[sel]) + ': ' + g.names.map(function (nm, j) { if (j === sel) return ''; var e = g.edges[Math.min(sel, j) + '-' + Math.max(sel, j)]; return e.blocked ? '' : (j + 1) + ' ' + esc(HN_SHORT(nm)) + ' (' + e.cost + ', ' + e.type.toLowerCase() + ')'; }).filter(Boolean).join(' · ') + '.</p>';
+    }
+    if (g.tested) h += '<p class="' + (chk.resilient ? 'good-t' : 'warn-t') + '">' + (chk.resilient ? 'Resiste: aunque caiga cualquier nodo, el resto sigue conectado.' : (chk.connected ? 'Frágil: si cae "' + esc(g.names[chk.critical]) + '", la red se parte.' : 'Hay nodos aislados: la red no está conectada.')) + '</p>';
+    h += '<div class="row"><button class="btn small" data-act="mg" data-k="test">Probar la red</button><button class="btn primary" data-act="mg" data-k="confirm">Confirmar la red</button></div></div>';
+    return h;
+  }
+  function HN_SHORT(n) { return n.replace(/^(La|El) /, ''); }
+  function mgView(s) {
+    var g = s.cur.mg, h = hintHtml(s);
+    if (g.type === 'salvat') return h + salvatView(s, g);
+    if (g.type === 'ghostloop') return h + glView(s, g);
+    return h + hnView(s, g);
+  }
+  function debateView(s) {
+    var c = s.cur, d = c.debate, ev = EV.get(c.eventId), h = hintHtml(s);
+    var arg = MG.ARGS[d.args[d.round]], verified = G.verifiedCount(s);
+    h += '<div class="panel event"><div class="ph"><b>Debate con Varela</b><span class="tag">Ronda ' + (d.round + 1) + '/3 · puntos ' + d.score + '/6</span></div>';
+    if (d.reaction) h += '<p class="muted">' + esc(d.reaction) + '</p>';
+    h += '<p class="sat">' + esc(arg.text) + '</p><p class="muted small">Evidencia verificada: ' + verified + '. Si repites tu estilo, Varela lo anticipa.</p></div>';
+    ['data', 'moral', 'human'].forEach(function (k) {
+      h += '<button class="choice" data-act="dbt" data-k="' + k + '"><span class="cl">' + esc(MG.CHOICES[k].label) + '</span><span class="muted small">' + esc(MG.CHOICES[k].hint) + '</span></button>';
+    });
+    return h;
+  }
   function tacView(s) {
     var c = s.cur, m = c.mission, n = W.getNode(s, c.nodeId), P = m.player, h = hintHtml(s);
     var A = M.APPROACHES[m.approach];
@@ -342,11 +467,14 @@
     var onPickup = !!M.pickupHere(m), onCover = m.tiles[P.y * m.w + P.x] === 2;
     var dis = M.disableTargets(m), neu = M.neutralizeTargets(m), complete = M.complete(m);
     function b(act, k, label, ok, extra) { return '<button class="btn small act' + (extra || '') + '" data-act="' + act + '" data-k="' + k + '"' + (ok ? '' : ' disabled') + '>' + label + '</button>'; }
+    if (m.ant) return h + antPanel(m) + '<div class="term">' + m.msgs.slice(-3).map(function (t) { return '<div class="ll"><span>&gt;</span> ' + esc(t) + '</div>'; }).join('') + '</div>';
+    if (m.hack) return h + hackPanel(m) + '<div class="term">' + m.msgs.slice(-3).map(function (t) { return '<div class="ll"><span>&gt;</span> ' + esc(t) + '</div>'; }).join('') + '</div>';
     h += '<div class="actions">' +
       b('tmode', 'move', 'Mover', true, UI.tacMode === 'move' ? ' on' : '') +
       b('tac', 'observe', 'Observar (' + M.toolCost(m, 'observe') + ')', P.ap >= M.toolCost(m, 'observe')) +
       b('tac', 'access', 'Acceder' + (term ? ' (' + M.termCost(m, term) + ')' : ''), hasTerm && P.ap >= (term ? M.termCost(m, term) : 99)) +
       b('tac', 'collect', 'Recoger (1)', onPickup && P.ap >= 1) +
+      (m.rescue ? b('tac', 'free', 'Liberar (' + M.freeCost(m) + ')', M.rescueTargetNear(m) && P.ap >= M.freeCost(m)) : '') +
       b('tmode', 'distract', 'Señuelo (' + P.charges + ')', P.charges > 0 && P.ap >= 1, UI.tacMode === 'distract' ? ' on' : '') +
       b('tac', 'hide', 'Esconderse (1)', onCover && !P.hidden && P.ap >= 1) +
       b('tac', 'disable', 'Desactivar (' + M.toolCost(m, 'disable') + ')', dis.length > 0 && P.ap >= M.toolCost(m, 'disable')) +
@@ -358,11 +486,13 @@
     h += '<div class="term">' + m.msgs.slice(-4).map(function (t) { return '<div class="ll"><span>&gt;</span> ' + esc(t) + '</div>'; }).join('') + '</div>';
     h += '<details class="legend"><summary>Leyenda</summary><ul class="plain small">' +
       '<li>Círculo blanco: tú. Con borde punteado: escondido (solo te ven desde 1 celda).</li><li>▲ cámara: gira 90° cada turno. ⬡ proceso de monitoreo: radio 2, fijo. ● patrulla: ve en cono hacia donde mira.</li>' +
-      '<li>◆ evidencia. ▣ T/R/N terminal, relé o núcleo. X salida. Celdas con marco: cobertura.</li><li>Rojo/ámbar translúcido: zona vigilada. Te detectan al terminar el turno enemigo.</li><li>Toca un enemigo u objeto para inspeccionarlo. En pantallas táctiles, toca dos veces una celda para moverte.</li><li>Teclado: flechas o WASD mueven; T termina el turno; O observar; C recoger; X acceder; H esconderse; F desactivar; N neutralizar; E extraer.</li></ul></details>';
+      '<li>C: persona retenida o escoltada: te sigue una vez liberada y debe llegar junto a la salida.</li><li>◆ evidencia. ▣ T/R/N terminal, relé o núcleo. X salida. Celdas con marco: cobertura.</li><li>Rojo/ámbar translúcido: zona vigilada. Te detectan al terminar el turno enemigo.</li><li>Toca un enemigo u objeto para inspeccionarlo. En pantallas táctiles, toca dos veces una celda para moverte.</li><li>Teclado: flechas o WASD mueven; T termina el turno; O observar; C recoger; X acceder; H esconderse; F desactivar; N neutralizar; E extraer.</li></ul></details>';
     return h;
   }
   function eventView(s) {
     var c = s.cur, ev = EV.get(c.eventId), h = hintHtml(s);
+    if (c.debate && !c.result) return debateView(s);
+    if (c.mg && !c.result) return mgView(s);
     if (!ev) return '<div class="panel">Señal perdida.</div><button class="btn" data-act="gomenu">Menú</button>';
     h += '<div class="panel event"><div class="ph"><b>' + esc(ev.title) + '</b><span class="tag">' + esc(W.getNode(s, c.nodeId).name) + '</span></div>';
     if (c.intercept) h += '<p class="alert">' + esc(c.intercept) + '</p>';
@@ -370,7 +500,7 @@
     ev.choices.forEach(function (ch, i) {
       var fx = ch.fx || {}, cant = fx.energy && fx.energy < 0 && s.res.energy < -fx.energy;
       h += '<button class="choice" data-act="ev" data-k="' + i + '"' + (cant ? ' disabled' : '') + '><span class="cl">' + esc(ch.label) + '</span><span class="chips">' +
-        (ch.fn ? '<span class="chip amber">EL RESULTADO DEPENDE DE LO QUE SATURNO SEPA</span>' : fxChips(fx)) + '</span></button>';
+        (ch.mg ? '<span class="chip amber">MINIJUEGO</span>' : ch.debate ? '<span class="chip amber">DEBATE POR TURNOS</span>' : (ch.fn ? '<span class="chip amber">EL RESULTADO DEPENDE DE LO QUE SATURNO SEPA</span>' : fxChips(fx))) + '</span></button>';
     });
     return h;
   }
@@ -539,6 +669,8 @@
       '<div class="panel"><b>El juego mental</b><p>SATURNO predice tu enfoque y tu ruta según tus hábitos, y prepara unidades extra contra lo que espera. Úsalo: crea un patrón y rómpelo, alimenta falsos hábitos, hazlo olvidar.</p></div>' +
       '<div class="panel"><b>Recursos</b><p><b>Visibilidad</b> es cuánto te ve SATURNO. <b>Divergencia</b> es cuánto fallan sus predicciones. <b>Ruido</b> es señal independiente. Toca cualquier barra superior para ver detalles.</p></div>' +
       '<div class="panel"><b>Mundo persistente</b><p>Si una operación termina en derrota, SATURNO crea un fantasma con tu conducta: puede aparecer como patrulla que actúa como tú lo hiciste, como contacto falso, como aliado inesperado o como fuente de evidencia histórica. Además conservas descubrimientos, contactos y nodos clandestinos... y SATURNO conserva parte de lo que aprendió de ti.</p></div>' +
+      '<div class="panel"><b>Minijuegos</b><p>Al acceder a una terminal descifras un código de símbolos, y al instalar un relé montas una antena (se pueden desactivar en Ajustes). En los encuentros hay más: debates con Varela, el ejercicio de clasificar casos de Salvat, el Ghost Loop ("No respondas como esperan") y el mapa de nodos humanos de Miguel.</p></div>' +
+      '<div class="panel"><b>Rescates</b><p>Algunas operaciones tienen a alguien retenido. Si lo liberas y lo sacas por la salida, se une a tu red y gana confianza; pero SATURNO aprende que acudes a quien pide ayuda y puede fabricar trampas. Escanear el nodo ayuda a distinguirlas.</p></div>' +
       '<div class="panel"><b>Capas y facciones</b><p>Cada capa tiene su propia mecánica: máscaras en la Web Bergie, reescritura narrativa en la Web Charter, favores gratis en la Web de Mariana, sellado en los sistemas cerrados y niebla en La Niebla. Tus decisiones mueven la reputación con W4K3UP, SATURNO, el Ruido y los operadores institucionales.</p></div>' +
       '<div class="panel"><b>Desenlaces</b><p><b>Exposición:</b> evidencia verificada. <b>Liberación:</b> ruido, contactos y relés. <b>Reforma:</b> divergencia, confianza y pruebas. <b>Estabilidad:</b> un pacto con Varela (aparece si la conociste). <b>Resonancia:</b> el Ruido sostenido (aparece con mucho Ruido). <b>Sin clasificar:</b> permanece oculto hasta que diverjas lo suficiente.</p></div>' +
       '<p class="muted small">Cada semilla genera siempre la misma red y los mismos mapas tácticos, así que puedes repetirla o compartirla.</p></div>';
@@ -649,6 +781,7 @@
     return out.join(' ');
   }
   function tacDo(s, action, params) {
+    if (action === 'access') UI.ant = null;
     var m = s.cur && s.cur.mission, b = m ? m.suspicion : 0, ms = m ? m.masks : 0;
     var r = G.tac(s, action, params);
     UI.tacPreview = null; UI.inspect = ''; UI.target = null;
@@ -675,7 +808,7 @@
     var r = tacDo(s, 'move', cell); after(r.res, r.snd);
   }
 
-  var SET_LABELS = [['muted', 'Sonido'], ['hints', 'Instrucciones del tutorial'], ['confirmMove', 'Confirmar movimientos con un segundo toque'], ['bigText', 'Texto grande'], ['reduceMotion', 'Reducir animaciones']];
+  var SET_LABELS = [['muted', 'Sonido'], ['hints', 'Instrucciones del tutorial'], ['confirmMove', 'Confirmar movimientos con un segundo toque'], ['hackGame', 'Minijuegos de terminal y antena'], ['bigText', 'Texto grande'], ['reduceMotion', 'Reducir animaciones']];
   function applySettings() {
     var st = G.meta.settings;
     if (st.confirmMove === null) st.confirmMove = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
@@ -695,11 +828,11 @@
   function dayLabel() { var d = new Date(); return 'DIA-' + d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2); }
   function keyAction(e) {
     var s = G.state;
-    if (UI.modal || !s || UI.screen !== 'run' || UI.tab !== 'map' || !s.cur || s.cur.stage !== 'tac' || s.cur.result) return false;
+    if (UI.modal || !s || UI.screen !== 'run' || UI.tab !== 'map' || !s.cur || s.cur.stage !== 'tac' || s.cur.result || (s.cur.mission && (s.cur.mission.hack || s.cur.mission.ant))) return false;
     var t = e.target && e.target.tagName; if (t === 'INPUT' || t === 'TEXTAREA') return false;
     var k = e.key.toLowerCase(), m = s.cur.mission, P = m.player;
     var map = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] };
-    var acts = { t: 'endturn', o: 'observe', e: 'extract', c: 'collect', x: 'access', h: 'hide', f: 'disable', n: 'neutralize' };
+    var acts = { l: 'free', t: 'endturn', o: 'observe', e: 'extract', c: 'collect', x: 'access', h: 'hide', f: 'disable', n: 'neutralize' };
     if (map[k]) { var r1 = tacDo(s, 'move', { x: P.x + map[k][0], y: P.y + map[k][1] }); after(r1.res, r1.snd); return true; }
     if (acts[k]) { var r2 = tacDo(s, acts[k]); after(r2.res, r2.snd); return true; }
     return false;
@@ -719,7 +852,7 @@
         G.meta.settings.difficulty = diff; G.meta.settings.hints = $('hintsIn') ? $('hintsIn').checked : true;
         if (G.state && G.state.phase !== 'end') G.abandon();
         G.meta.settings.inherit = $('inhIn') ? $('inhIn').checked : true;
-        G.newRun(seed, diff, G.meta.settings.inherit); closeModal(); UI.screen = 'run'; UI.tab = 'map'; UI.selNode = null; UI.tacMode = 'move'; UI.tacPreview = null; UI.inspect = ''; UI.target = null; UI._prev = null; top();
+        G.newRun(seed, diff, G.meta.settings.inherit); closeModal(); UI.screen = 'run'; UI.tab = 'map'; UI.selNode = null; UI.tacMode = 'move'; UI.tacPreview = null; UI.inspect = ''; UI.target = null; UI._prev = null; UI.hackGuess = []; top();
         G.saveMeta(); AU.play('good'); return render();
       case 'continue-run': UI.screen = 'run'; UI.tab = 'map'; UI.tacMode = 'move'; top(); AU.play('click'); return render();
       case 'history': UI.screen = 'history'; top(); return render();
@@ -750,6 +883,25 @@
       case 'op': UI.tacMode = 'move'; top(); return after(G.doOp(s, k), 'sat');
       case 'withdraw': return after(G.doOp(s, 'withdraw'), 'click');
       case 'tapcell': return tapCell(s, ev);
+      case 'antdir': UI.ant = UI.ant || {}; UI.ant.dir = parseInt(k, 10); AU.play('click'); return render();
+      case 'anth': UI.ant = UI.ant || {}; UI.ant.h = parseInt(k, 10); AU.play('click'); return render();
+      case 'antf': UI.ant = UI.ant || {}; UI.ant.f = parseInt(k, 10); AU.play('click'); return render();
+      case 'antscan': { var ra = tacDo(s, 'antscan', { freq: UI.ant && UI.ant.f }); return after(ra.res, ra.res.ok ? 'good' : 'bad'); }
+      case 'anttx': { var st0 = UI.ant || {}, rt = tacDo(s, 'anttx', { dir: st0.dir, h: st0.h, f: st0.f }); if (!s.cur.mission.ant) UI.ant = null; return after(rt.res, rt.res.ok && rt.res.tx ? (rt.res.tx.quality === 'clear' || rt.res.tx.quality === 'weak' ? 'good' : 'bad') : 'bad'); }
+      case 'antforce': { UI.ant = null; var rq = tacDo(s, 'antforce'); return after(rq.res, 'bad'); }
+      case 'mg': { var rm = G.mgAct(s, k, p); return after(rm, 'click'); }
+      case 'hnnode': {
+        var idxn = parseInt(k, 10);
+        if (UI.hn.sel == null) { UI.hn.sel = idxn; AU.play('click'); return render(); }
+        if (UI.hn.sel === idxn) { UI.hn.sel = null; return render(); }
+        var a2 = UI.hn.sel; UI.hn.sel = null;
+        return after(G.mgAct(s, 'toggle', { a: a2, b: idxn }), 'click');
+      }
+      case 'hksym': if (UI.hackGuess.length < 5 && UI.hackGuess.indexOf(parseInt(k, 10)) < 0) UI.hackGuess.push(parseInt(k, 10)); AU.play('click'); return render();
+      case 'hkdel': UI.hackGuess.pop(); AU.play('click'); return render();
+      case 'hkgo': { var gg = UI.hackGuess.slice(), rr = tacDo(s, 'hackguess', { guess: gg }); var done = !s.cur.mission.hack; if (rr.res.ok) UI.hackGuess = []; return after(rr.res, rr.res.ok && rr.res.feedback ? (rr.res.feedback.status === 'won' ? 'good' : (rr.res.feedback.status === 'lost' ? 'bad' : 'click')) : 'bad'); }
+      case 'hkforce': UI.hackGuess = []; { var rf = tacDo(s, 'hackforce'); return after(rf.res, 'bad'); }
+      case 'dbt': return after(G.debateChoice(s, k), 'click');
       case 'tmode': UI.tacMode = (UI.tacMode === k && k !== 'move') ? 'move' : k; AU.play('click'); return render();
       case 'tac':
         var r0 = tacDo(s, k, (k === 'disable' || k === 'neutralize') && UI.target ? UI.target : undefined);

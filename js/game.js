@@ -1,7 +1,7 @@
 /* Reglas y máquina de estados. Lógica pura: sin acceso al DOM. Todo el estado es JSON simple. */
 (function () {
   'use strict';
-  var W4 = window.W4, U = W4.U, W = W4.World, SAT = W4.Saturno, EV = W4.Events, M = W4.Missions, SV = W4.Save, PE = W4.Persist;
+  var W4 = window.W4, U = W4.U, W = W4.World, SAT = W4.Saturno, EV = W4.Events, M = W4.Missions, SV = W4.Save, PE = W4.Persist, MG = W4.Minigames;
 
   var DIFF = {
     easy:   { label: 'Analista',  desc: 'Más energía y herramientas. SATURNO se adapta despacio.', energy: 10, integ: 100, vis: 0,  noise: 5, trust: 1, items: ['ghostsim', 'decoy', 'jammer', 'sniffer'], adapt: 0.75 },
@@ -216,6 +216,7 @@
     } else {
       var pred = SAT.predictApproach(state, n.type);
       cur.pred = pred; cur.counter = SAT.countermeasure(state, pred);
+      cur.trap = !!(n.rescue && state.saturno.help >= 1.5 && (U.hashSeed(state.seed + n.id) % 10) < 7);
       cur.toolPred = SAT.predictTool(state); cur.tcm = SAT.toolCounter(state, cur.toolPred);
       SAT.observeEnergy(state);
       if (state.ghosts.length && state.layerIdx >= 1 && state.ghostLayers.indexOf(state.layerIdx) < 0 && U.rollState(state) < (W.layerMods(state).ghostP || 0.4)) {
@@ -238,6 +239,15 @@
 
   var TCM_TEXT = { distract: 'los señuelos atraen solo a patrullas cercanas y por poco tiempo', hide: 'las coberturas ya no te ocultan a 2 celdas', disable: 'desactivar sensores cuesta 2 PA', observe: 'observar cuesta 2 PA' };
   G.TCM_TEXT = TCM_TEXT;
+  var WHO = [{ name: 'Irene Soto', role: 'Archivista', favor: 'verify' }, { name: 'Dario Vega', role: 'Técnico de red', favor: 'energy' }, { name: 'Noor Hadad', role: 'Periodista', favor: 'noise' }, { name: 'Pablo Ríos', role: 'Mensajero', favor: 'vis' }, { name: 'Ximena Cruz', role: 'Analista desertora', favor: 'intel' }];
+  function pickWho(state, n) {
+    var start = U.hashSeed(n.id + state.seed) % WHO.length;
+    for (var i = 0; i < WHO.length; i++) {
+      var w = WHO[(start + i) % WHO.length];
+      if (!state.contacts.some(function (c) { return c.name === w.name; })) return w;
+    }
+    return WHO[start];
+  }
   // Brief -> inicia la misión táctica con el enfoque elegido.
   G.doOp = function (state, ap) {
     var cur = state.cur;
@@ -271,10 +281,10 @@
     if (cur.tcm && state.armed.jam) lines.push('Tu inhibidor también anuló el entrenamiento táctico de SATURNO.');
     else if (tcmOn) lines.push('SATURNO entrenó a sus unidades contra ' + SAT.TOOL_LABEL[cur.tcm.tool].toUpperCase() + ': ' + TCM_TEXT[cur.tcm.tool] + '.');
     SAT.observeType(state, n.type);
-    var ctx = { tcm: tcmOn ? cur.tcm.tool : null, vision: (mods.fog && r.noise < 30) ? 3 : 6, remote: !!mods.remote, hackExtra: mods.hackCost || 0, masks: state.masks || 0, sealed: !!(mods.sealed && !n.scanned), burner: !!state.armed.burner, susp: r.vis >= 70 ? 1.3 : (r.vis >= 40 ? 1.15 : 1) };
+    var ctx = { puzzle: G.meta.settings.hackGame !== false, tcm: tcmOn ? cur.tcm.tool : null, vision: (mods.fog && r.noise < 30) ? 3 : 6, remote: !!mods.remote, hackExtra: mods.hackCost || 0, masks: state.masks || 0, sealed: !!(mods.sealed && !n.scanned), burner: !!state.armed.burner, susp: r.vis >= 70 ? 1.3 : (r.vis >= 40 ? 1.15 : 1) };
     var gObj = null, gs = cur.ghost ? state.ghosts.filter(function (x) { return x.id === cur.ghost; })[0] : null;
     if (gs) { var gp = PE.ghostProfile(gs); gObj = { id: gs.id, name: gs.name, mode: gp.mode, ignoreDecoy: gp.ignoreDecoy, label: gs.label }; lines.push('Tu fantasma ' + gs.name + ' opera aquí: ' + PE.MODE_TEXT[gp.mode]); }
-    cur.mission = M.generate(state.seed, n, ap, cm, ctx, n.scanned, M.effThreat(state, n), gObj);
+    cur.mission = M.generate(state.seed, n, ap, cm, ctx, n.scanned, M.effThreat(state, n), gObj, n.rescue ? { trap: !!cur.trap, who: pickWho(state, n) } : null);
     if (r.div >= 60) { cur.mission.player.maxAp += 1; cur.mission.player.ap += 1; lines.push('El modelo de SATURNO está ciego contigo: +1 PA en esta misión.'); }
     cur.stage = 'tac'; cur.startLines = lines; cur.cmCount = cm;
     state.armed = {};
@@ -330,6 +340,21 @@
       fx.integ = (fx.integ || 0) - 5 * m.kills; fx.vis = (fx.vis || 0) + 10 * m.kills; fx.noise = (fx.noise || 0) + 4 * m.kills;
       lines.push('Neutralizar patrullas tuvo un costo: -' + (5 * m.kills) + ' Integridad, +' + (10 * m.kills) + ' Visibilidad.');
     }
+    if (m.antQ === 'clear' && won) { fx.noise = (fx.noise || 0) + 8; lines.push('El enlace limpio de la antena amplifica tu señal: +8 Ruido.'); }
+    if (m.rescue) {
+      var RS = m.rescue, who = RS.who;
+      if (RS.state === 'free' && won) {
+        fx.trust = (fx.trust || 0) + 2; fx.contact = who; fx.rep = fx.rep || {}; fx.rep.w4k3up = (fx.rep.w4k3up || 0) + 1; SAT.noteHelp(state);
+        lines.push('Rescataste a ' + who.name + ' (' + who.role + '). Se une a tu red. SATURNO anota que acudes a quien pide ayuda.');
+      } else if (RS.state === 'trap') {
+        fx.evidence = (fx.evidence || 0) + 1; fx.flag = fx.flag || 'fabrication_proof';
+        lines.push('Era un señuelo fabricado por SATURNO. Guardas la señal falsa como prueba de que fabrica peticiones de auxilio.');
+      } else if (RS.state === 'captured') {
+        fx.trust = (fx.trust || 0) - 1; fx.rep = fx.rep || {}; fx.rep.w4k3up = (fx.rep.w4k3up || 0) - 1;
+        lines.push(who.name + ' fue capturada. La red lo sabrá.');
+      } else if (RS.state === 'free') lines.push('No lograste sacar a ' + who.name + ' a tiempo: queda atrás.');
+      else lines.push('Dejaste atrás a ' + who.name + ', retenida.');
+    }
     // SATURNO puntúa su predicción táctica y luego aprende de lo que hiciste en la misión.
     var tp = cur.toolPred, fav = SAT.favoriteTool(m.acts);
     if (tp && tp.n >= 3 && fav) {
@@ -339,8 +364,9 @@
     SAT.observeTools(state, m.acts);
     if (won || partial) SAT.observeExtract(state, won);
     if ((state.masks || 0) !== m.masks) { lines.push('Máscaras usadas: ' + ((state.masks || 0) - m.masks) + '. Te quedan ' + m.masks + '.'); state.masks = m.masks; }
-    if (won && n.type === 'disruption') fx.rep = { noise: 1, w4k3up: 1 };
-    if (won && n.type === 'elite') fx.rep = { saturno: -1 };
+    fx.rep = fx.rep || {};
+    if (won && n.type === 'disruption') { fx.rep.noise = (fx.rep.noise || 0) + 1; fx.rep.w4k3up = (fx.rep.w4k3up || 0) + 1; }
+    if (won && n.type === 'elite') fx.rep.saturno = (fx.rep.saturno || 0) - 1;
     var o2 = applyFx(state, fx);
     lines = lines.concat(o2.notes);
     if (outcome === 'fail' && cur.pred && cur.pred.n >= 2) lines.push('El fracaso revela lo que SATURNO esperaba de ti: ' + SAT.LABEL[cur.pred.approach].toUpperCase() + '.');
@@ -355,6 +381,18 @@
     if (!cur || cur.kind !== 'event' || cur.result) return { ok: false, msg: 'No hay evento en curso.' };
     var ev = EV.get(cur.eventId), ch = ev && ev.choices[idx];
     if (!ch) return { ok: false, msg: 'Opción inválida.' };
+    if (ch.mg) {
+      cur.mg = ch.mg === 'salvat' ? MG.salvatCreate(state) : (ch.mg === 'ghostloop' ? MG.glCreate(state) : MG.hnCreate(state.seed, cur.nodeId));
+      state.decisions.push(ev.title + ': ' + ch.label); if (state.decisions.length > 8) state.decisions.shift();
+      log(state, 'Comienza un minijuego: ' + ev.title + '.', 'sat'); persist();
+      return { ok: true };
+    }
+    if (ch.debate) {
+      cur.debate = MG.debateCreate(state);
+      state.decisions.push(ev.title + ': ' + ch.label); if (state.decisions.length > 8) state.decisions.shift();
+      log(state, 'Comienza un debate con Varela.', 'sat'); persist();
+      return { ok: true };
+    }
     var res = ch.fn ? ch.fn(state) : { fx: ch.fx, out: ch.out };
     var fx = res.fx || {};
     if (fx.energy && fx.energy < 0 && state.res.energy < -fx.energy) return { ok: false, msg: 'Energía insuficiente.' };
@@ -366,6 +404,49 @@
     cur.result = { title: ev.title, outcome: 'event', text: res.out, fx: o, lines: o.notes.slice() };
     log(state, ev.title + ': ' + ch.label + '.', 'info');
     if (!checkEnd(state)) persist();
+    return { ok: true };
+  };
+
+  // Una ronda del debate con Varela; al terminar la tercera se aplican los efectos.
+  G.debateChoice = function (state, choice) {
+    var cur = state.cur;
+    if (!cur || cur.kind !== 'event' || !cur.debate || cur.debate.done || cur.result) return { ok: false, msg: 'No hay debate en curso.' };
+    var r = MG.debateChoose(state, cur.debate, choice);
+    if (!r) return { ok: false, msg: 'Opción inválida.' };
+    if (r.done) {
+      var oc = MG.debateOutcome(cur.debate.score), o = applyFx(state, oc.fx);
+      cur.result = { title: oc.title, outcome: oc.key === 'lose' ? 'fail' : 'success', text: oc.text, fx: o, lines: ['Puntaje del debate: ' + cur.debate.score + '/6. ' + cur.debate.reaction] };
+      log(state, 'Debate con Varela: ' + oc.title.toLowerCase() + ' (' + cur.debate.score + '/6).', oc.key === 'lose' ? 'warn' : 'good');
+      if (!checkEnd(state)) persist();
+    } else persist();
+    return { ok: true };
+  };
+
+  function finishMg(state, oc, extra) {
+    var cur = state.cur, o = applyFx(state, oc.fx), bad = ['absorbed', 'auto', 'broken'].indexOf(oc.key) >= 0;
+    cur.result = { title: oc.title, outcome: bad ? 'fail' : 'success', text: oc.text, fx: o, lines: [extra].concat(o.notes) };
+    log(state, oc.title + '.', bad ? 'warn' : 'good');
+    if (!checkEnd(state)) persist();
+  }
+  // Acciones de los minijuegos de evento: clasificar casos, Ghost Loop y red humana.
+  G.mgAct = function (state, action, p) {
+    var cur = state.cur, g = cur && cur.mg;
+    if (!g || cur.result) return { ok: false, msg: 'No hay minijuego en curso.' };
+    if (g.type === 'salvat') {
+      var ok = action === 'cat' ? MG.salvatPick(g, p) : (action === 'why' ? MG.salvatWhy(g, p) : (action === 'next' ? MG.salvatNext(g) : false));
+      if (!ok) return { ok: false, msg: 'Acción no válida.' };
+      if (g.done) finishMg(state, MG.salvatOutcome(g), 'Puntaje: ' + g.pts + '/12. Falsos positivos: ' + g.fp + ', falsos negativos: ' + g.fn + '.');
+    } else if (g.type === 'ghostloop') {
+      var r = action === 'opt' ? MG.glChoose(state, g, p) : null;
+      if (!r) return { ok: false, msg: 'Acción no válida.' };
+      if (g.done) finishMg(state, MG.glOutcome(g), 'Puntaje: ' + g.pts + '/10. ' + g.fb);
+    } else if (cur.mg.edges) {
+      if (action === 'toggle') { var t = MG.hnToggle(g, p.a, p.b); if (!t.ok) return t; }
+      else if (action === 'test') MG.hnTest(g);
+      else if (action === 'confirm') { g.done = true; finishMg(state, MG.hnOutcome(g), 'Coste usado: ' + MG.hnCheck(g, g.links).cost + ' de ' + g.budget + '.'); }
+      else return { ok: false, msg: 'Acción no válida.' };
+    }
+    persist();
     return { ok: true };
   };
 

@@ -79,6 +79,13 @@
       var p = cell(u.x, u.y), r = cs * .26;
       poly(g, [[p[0] + cs / 2, p[1] + cs / 2 - r], [p[0] + cs / 2 + r, p[1] + cs / 2], [p[0] + cs / 2, p[1] + cs / 2 + r], [p[0] + cs / 2 - r, p[1] + cs / 2]], C.amber, null);
     });
+    var RS = m.rescue;
+    if (RS && (RS.state === 'bound' || RS.state === 'free') && m.seen[RS.y * m.w + RS.x]) {
+      var rx = RS.x * cs + cs / 2, ry = RS.y * cs + cs / 2;
+      g.beginPath(); g.arc(rx, ry, cs * .3, 0, 7); g.fillStyle = '#0e2a33'; g.fill();
+      g.strokeStyle = C.cyan; g.lineWidth = 2; if (RS.state === 'bound') g.setLineDash([3, 3]); g.stroke(); g.setLineDash([]);
+      g.fillStyle = C.cyan; g.font = 'bold ' + Math.round(cs * .36) + 'px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('C', rx, ry + 1);
+    }
     // enemigos
     m.enemies.forEach(function (e) {
       var seenNow = vis[e.y * m.w + e.x] || showAll || (e.type !== 'patrol' && e.known);

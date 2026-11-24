@@ -19,6 +19,7 @@ js/world.js     capas y generador procedural de la red
 js/saturno.js   motor de predicción conductual
 js/events.js    eventos narrativos
 js/persist.js   mundo persistente: fantasmas, memoria, herencia y consecuencias
+js/minigames.js intrusión de terminal y debate con Varela
 js/missions.js  motor táctico (cuadrícula, visión, detección, IA enemiga)
 js/tactical.js  dibujo en Canvas 2D y traducción de toques
 js/audio.js     efectos de sonido con Web Audio
@@ -91,6 +92,38 @@ cuadrícula de 10x10 o 12x12, generada de forma determinista a partir de la semi
   máscaras consumidas, éxito y derrota.
 * **Rejugabilidad:** botón "Semilla del día" (misma semilla para todos cada día), repetir semilla y herencia opcional del mundo.
 
+## Minijuegos
+* **Intrusión de terminal:** al usar Acceder se abre un puzzle de código de símbolos sin repetir (3 símbolos de 4 en las capas 0-3; 4 de 5
+  después). Cada intento da ●N (correcto en su lugar) y ○N (correcto en otro lugar). Resuelto en 2 intentos o menos: recuperas 1 PA.
+  Fallar o forzar el acceso abre la terminal igual, pero salta una alarma (+30 sospecha), así que nunca hay callejones sin salida.
+  Hackeo recibe 1 intento extra y una pista. El código es el mismo para la misma semilla. Se puede desactivar en Ajustes.
+* **Debate con Varela:** tres rondas por turnos en los encuentros con Varela. Cada argumento es de cifras, de deber o de personas, y se
+  responde mejor con datos verificados, autonomía o empatía respectivamente. Repetir tu estilo hace que ella lo anticipe. El resultado
+  (ganar, empatar, perder) cambia la reputación con los operadores, da Ruido o evidencia y deja constancia de que la conociste (Estabilidad).
+
+## Minijuegos inspirados en la novela
+Se revisó el manuscrito *Cómo se codificó el primer NO*; estos minijuegos salen de sus escenas:
+* **Montar la antena** (final, Miguel en la azotea): al instalar un relé en una disrupción. Orientación hacia el salón de actos, mástil que
+  supere el depósito sin asomar y frecuencia fuera de las bandas vigiladas. Los escaneos revelan bandas vigiladas y la estática de las libres.
+  Un enlace limpio da +8 Ruido; fallar o abandonar suma 30 de sospecha.
+* **El ejercicio de Salvat** (clase de Laura): 4 casos con cuatro casillas (sin intervención, seguimiento, evaluación, intervención) y una
+  justificación. Los falsos positivos y negativos cuentan. Pensar como SATURNO sube su reputación; el criterio sólido da Confianza y Divergencia.
+* **Ghost Loop** (nivel 7.5, Manual del NO): 5 voces de conformidad. Cada tipo se contesta mejor con una regla del manual, y el bucle predice
+  tu réplica con tus hábitos: repetirte resta puntos.
+* **Tejer la red humana** (el mapa de Miguel): unir 6 personas y lugares con enlaces de coste limitado (algunos vigilados) para que la red
+  aguante la caída de cualquier nodo. Una red resistente da un relé, Ruido, un contacto y reputación.
+* Los tres últimos son eventos (capas 3+, 7+ y 2+). La antena y la intrusión se desactivan en Ajustes.
+
+## Mecánica añadida: rescate y escolta de contactos
+* Algunas operaciones (investigación, infiltración, alto riesgo, capas 1 a 7) traen una **señal de auxilio**: una persona retenida (C en el mapa).
+* **Liberar** (2 PA, 1 con Hackeo) estando adyacente. Después te sigue a una celda de distancia; las cámaras y patrullas también la ven
+  (suman sospecha) y si una patrulla se le acerca, la capturan. Debe estar junto a la salida cuando extraigas.
+* **Recompensa:** se une a tu red como contacto con un favor, +2 Confianza y reputación con W4K3UP. Si la capturan, pierdes Confianza y reputación.
+* **Juego mental con SATURNO:** cada rescate cuenta como ayuda a un contacto. Si respondes siempre a las peticiones de ayuda, SATURNO puede
+  fabricar una trampa: al liberar al señuelo se dispara una alerta, pero conservas una prueba de que fabrica señales (descubrimiento
+  persistente). Escanear el nodo revela si los metadatos de la señal no cuadran.
+* Atajo de teclado: L = Liberar.
+
 ## Lista de pruebas manuales
 1. Menú → Nueva operación → Comenzar. Escanea y entra a un nodo de investigación.
 2. Elige un enfoque. Muévete tocando una celda; observa los conos rojos y cómo giran las cámaras al terminar el turno.
@@ -101,6 +134,10 @@ cuadrícula de 10x10 o 12x12, generada de forma determinista a partir de la semi
 7. Repite una semilla: mapa y misiones idénticos.
 11. Baja a la Web Bergie: recibes 2 máscaras (se ven en la cabecera de misión). En la Web Charter, la evidencia sin verificar corre peligro.
 13. Abre Ajustes: activa Texto grande y Confirmar movimientos. En una misión, toca una celda dos veces para moverte; toca una cámara para inspeccionarla.
+16. Accede a una terminal: resuelve el código (símbolos y ●/○). Prueba también Forzar acceso y desactivar el minijuego en Ajustes.
+18. Instala un relé (nodo de disrupción) y monta la antena. Busca los eventos Salvat, Ghost Loop y el mapa de Miguel.
+17. Si aparece Varela, elige Debatir y juega las tres rondas.
+15. Busca un nodo con "Petición de auxilio": escanéalo, libera a la persona (botón Liberar), escóltala a la salida y comprueba que se une a Contactos.
 14. Con teclado: flechas/WASD para mover y T para terminar el turno.
 12. En el Operativo revisa las Facciones y cómo cambian con tus decisiones.
 9. Pierde una partida: en el final se listan las consecuencias y se crea un fantasma. En Menú → Mundo persistente aparece con su comportamiento.

@@ -33,7 +33,7 @@
   }
   function defaultMeta() {
     return {
-      settings: { muted: false, hints: true, difficulty: 'normal', inherit: true, confirmMove: null, bigText: false, reduceMotion: false },
+      settings: { muted: false, hints: true, difficulty: 'normal', inherit: true, confirmMove: null, bigText: false, reduceMotion: false, hackGame: true },
       history: [], hintsSeen: [], lastSeed: '', world: defaultWorld()
     };
   }
@@ -62,7 +62,7 @@
       d.settings.hints = m.settings.hints !== false;
       d.settings.inherit = m.settings.inherit !== false;
       d.settings.confirmMove = typeof m.settings.confirmMove === 'boolean' ? m.settings.confirmMove : null;
-      d.settings.bigText = m.settings.bigText === true; d.settings.reduceMotion = m.settings.reduceMotion === true;
+      d.settings.hackGame = m.settings.hackGame !== false; d.settings.bigText = m.settings.bigText === true; d.settings.reduceMotion = m.settings.reduceMotion === true;
       if (['easy', 'normal', 'hard'].indexOf(m.settings.difficulty) >= 0) d.settings.difficulty = m.settings.difficulty;
     }
     if (Array.isArray(m.history)) d.history = m.history.filter(function (h) { return h && typeof h === 'object'; }).slice(-60);
